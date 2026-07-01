@@ -285,6 +285,24 @@
     <label><input type="checkbox" id="beatFlash" checked> Beat flash pulse</label>
   </div>
 
+  <div class="control-group inline">
+    <label><input type="checkbox" id="shockwaves" checked> Beat shockwaves</label>
+  </div>
+
+  <div class="control-group inline">
+    <label><input type="checkbox" id="outerElements" checked> Outer beat rays</label>
+  </div>
+
+  <div class="control-group">
+    <label>Petals <span id="petalsVal">3</span></label>
+    <input type="range" id="petals" min="1" max="12" step="1" value="3">
+  </div>
+
+  <div class="control-group">
+    <label>Bass reach <span id="bassReachVal">1.1</span></label>
+    <input type="range" id="bassReach" min="0.3" max="2.5" step="0.1" value="1.1">
+  </div>
+
   <div class="divider"></div>
 
   <p class="section-label">Shape</p>
@@ -415,6 +433,7 @@
   </div>
   <div class="button-row">
     <button id="randomBtn">🎲 Surprise me</button>
+    <button id="resetBtn">↺ Reset defaults</button>
   </div>
 
   <p class="hint">The mandala draws itself to your music — tweak the controls to taste. Move your cursor to add your own strokes.</p>
@@ -457,6 +476,12 @@
   let prevBrushX = null, prevBrushY = null;
   let beatFlash = true;    // user toggle (Task 5)
   let flashPulse = 0;      // decays 1 -> 0 after each beat
+  let petalCount = 3;      // radial in/out cycles per revolution (live slider)
+  let bassReach = 1.1;     // how far bass flings the arms outward (live slider)
+  let shockwavesOn = true; // expanding ripple on each beat
+  let shockwaves = [];     // active ripples: { r, life }
+  let outerElementsOn = true; // rays that fly out past the main circle on beats
+  let comets = [];            // outward spokes: { ang, head, len, life }
 
   const PALETTE_RANGES = {
     full:   [0, 360],
@@ -657,6 +682,8 @@
     updateAndDrawParticles();
 
     audioBrushStep();
+    updateAndDrawShockwaves();
+    updateAndDrawComets();
 
     // Cursor stays live as an optional secondary brush.
     if (lastX !== null && (mouseX !== lastX || mouseY !== lastY)){
@@ -673,16 +700,26 @@
     if (audioSignals.beat && beatFlash) flashPulse = 1;
     flashPulse *= 0.90;
 
+    // a kick sends an expanding ripple outward (capped so they can't pile up)
+    if (audioSignals.beat && shockwavesOn && shockwaves.length < 10){
+      shockwaves.push({ r: maxR * 0.12, life: 1 });
+    }
+
+    // a kick also flings a spoke out PAST the circle toward the edges
+    if (audioSignals.beat && outerElementsOn && comets.length < 14){
+      comets.push({ ang: brushAngle, head: maxR, len: maxR * 0.32, life: 1 });
+    }
+
     // The brush sweeps around AND weaves in/out, so its strokes cross radii —
     // that radial motion is what the symmetry turns into arms & petals.
     // (A constant radius, like before, could only ever draw a ring.)
     brushAngle += 0.05 + audioSignals.mids * 0.15;
 
-    const petals = 3;                                    // in/out cycles per revolution
-    const weave = 0.5 + 0.5 * sin(brushAngle * petals);  // 0..1 rose in/out
+    const weave = 0.5 + 0.5 * sin(brushAngle * petalCount);  // 0..1 rose in/out
     // bass sets how far the brush flings outward; a beat punches it further.
-    const reach = 0.12 + audioSignals.bass * 1.1 + flashPulse * 0.7;
-    const targetR = maxR * constrain(reach * (0.25 + 0.75 * weave), 0.04, 1);
+    const reach = 0.12 + audioSignals.bass * bassReach + flashPulse * 0.7;
+    // cap > 1 lets loud bass push the arms OUT past the base circle
+    const targetR = maxR * constrain(reach * (0.25 + 0.75 * weave), 0.04, 1.5);
     brushRadius = AudioCore.ease(brushRadius, targetR, 0.6); // snappy so it tracks the weave
 
     // highs add a fine shimmer to the radius
@@ -693,6 +730,46 @@
     if (prevBrushX === null){ prevBrushX = bx; prevBrushY = by; }
     drawMandalaStroke(prevBrushX, prevBrushY, bx, by, true);
     prevBrushX = bx; prevBrushY = by;
+  }
+
+  function updateAndDrawShockwaves(){
+    if (shockwaves.length === 0) return;
+    const cx = width / 2, cy = height / 2;
+    const maxR = min(width, height) * 0.55;
+    noFill();
+    strokeCap(ROUND);
+    for (let i = shockwaves.length - 1; i >= 0; i--){
+      const s = shockwaves[i];
+      s.r += maxR * 0.022;   // expand outward
+      s.life -= 0.02;        // fade as it grows
+      if (s.life <= 0 || s.r > maxR){ shockwaves.splice(i, 1); continue; }
+      const t = s.r / maxR;
+      const col = color(paletteHue(t), 70, 100, 85 * s.life);
+      drawingContext.shadowBlur = 16;
+      drawingContext.shadowColor = col.toString();
+      stroke(paletteHue(t), 70, 100, 85 * s.life);
+      strokeWeight(1.5 + 4 * s.life);
+      circle(cx, cy, s.r * 2);
+    }
+    drawingContext.shadowBlur = 0;
+  }
+
+  function updateAndDrawComets(){
+    if (comets.length === 0) return;
+    const cx = width / 2, cy = height / 2;
+    const maxR = min(width, height) * 0.46;
+    const outerMax = Math.sqrt(cx * cx + cy * cy); // fly out to the corners
+    for (let i = comets.length - 1; i >= 0; i--){
+      const c = comets[i];
+      c.head += (outerMax - maxR) * 0.035; // shoot outward past the circle
+      c.life -= 0.02;
+      if (c.life <= 0 || c.head - c.len > outerMax){ comets.splice(i, 1); continue; }
+      const r1 = c.head;
+      const r0 = Math.max(c.head - c.len, maxR * 0.5);
+      const x1 = cx + cos(c.ang) * r0, y1 = cy + sin(c.ang) * r0;
+      const x2 = cx + cos(c.ang) * r1, y2 = cy + sin(c.ang) * r1;
+      drawMandalaStroke(x1, y1, x2, y2, true); // symmetry replicates it into outward spokes
+    }
   }
 
   function paletteHue(t){
@@ -979,6 +1056,16 @@
       $('bassTrebleVal').textContent = bassTreble.toFixed(1);
     });
     $('beatFlash').addEventListener('change', (e) => { beatFlash = e.target.checked; });
+    $('shockwaves').addEventListener('change', (e) => { shockwavesOn = e.target.checked; });
+    $('outerElements').addEventListener('change', (e) => { outerElementsOn = e.target.checked; });
+    $('petals').addEventListener('input', (e) => {
+      petalCount = parseInt(e.target.value, 10);
+      $('petalsVal').textContent = petalCount;
+    });
+    $('bassReach').addEventListener('input', (e) => {
+      bassReach = parseFloat(e.target.value);
+      $('bassReachVal').textContent = bassReach.toFixed(1);
+    });
 
     $('autoRotate').addEventListener('change', (e) => {
       autoRotate = e.target.checked;
@@ -1025,11 +1112,53 @@
     $('clearBtn').addEventListener('click', () => { background(bgColourP5); });
     $('saveBtn').addEventListener('click', () => { saveCanvas('mandala', 'png'); });
     $('randomBtn').addEventListener('click', () => randomizeSettings($));
+    $('resetBtn').addEventListener('click', () => resetDefaults());
 
     $('presetNeon').addEventListener('click', () => applyPreset('neon'));
     $('presetGold').addEventListener('click', () => applyPreset('gold'));
     $('presetOcean').addEventListener('click', () => applyPreset('ocean'));
     $('presetChaos').addEventListener('click', () => applyPreset('chaosBloom'));
+  }
+
+  function resetDefaults(){
+    const $ = (id) => document.getElementById(id);
+    // set each control back to its default, then fire its own event so the
+    // existing handlers update both the state variable and the value label.
+    const setRange  = (id, v) => { const el = $(id); el.value = v; el.dispatchEvent(new Event('input')); };
+    const setCheck  = (id, v) => { const el = $(id); el.checked = v; el.dispatchEvent(new Event('change')); };
+    const setSelect = (id, v) => { const el = $(id); el.value = v; el.dispatchEvent(new Event('change')); };
+    const setColor  = (id, v) => { const el = $(id); el.value = v; el.dispatchEvent(new Event('input')); };
+
+    // Audio
+    setRange('reactivity', 1);
+    setRange('bassTreble', 0);
+    setCheck('beatFlash', true);
+    setCheck('shockwaves', true);
+    setCheck('outerElements', true);
+    setRange('petals', 3);
+    setRange('bassReach', 1.1);
+    // Shape
+    setRange('symmetry', 12);
+    setCheck('mirror', true);
+    setSelect('strokeStyle', 'line');
+    setRange('chaos', 0);
+    // Motion
+    setRange('brush', 3);
+    setCheck('reactSpeed', true);
+    setCheck('pulseBrush', false);
+    setCheck('sparkleDust', false);
+    setCheck('autoRotate', true);
+    setRange('rotateSpeed', 0.15);
+    // Color
+    setSelect('colourMode', 'rainbow');
+    setSelect('palette', 'full');
+    setColor('solidColor', '#ff3e94');
+    setRange('glow', 10);
+    // Trail & canvas
+    const fadeRadio = document.querySelector('input[name="trail"][value="fade"]');
+    if (fadeRadio){ fadeRadio.checked = true; fadeRadio.dispatchEvent(new Event('change')); }
+    setRange('fadeSpeed', 8);
+    setColor('bgColorPicker', '#0c0e1f');
   }
 
   function randomizeSettings($){
