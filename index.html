@@ -539,14 +539,20 @@
 
   // ---------- uploaded file ----------
   let fileAudioEl = null;
+  let fileSourceNode = null;
   function startFileSource(file){
     ensureAudioContext();
-    if (!fileAudioEl){ fileAudioEl = new Audio(); fileAudioEl.crossOrigin = 'anonymous'; }
+    if (!fileAudioEl){
+      fileAudioEl = new Audio();
+      fileAudioEl.crossOrigin = 'anonymous';
+      // createMediaElementSource may only be called ONCE per element — cache it.
+      fileSourceNode = audioCtx.createMediaElementSource(fileAudioEl);
+    }
+    if (fileAudioEl.src){ try { URL.revokeObjectURL(fileAudioEl.src); } catch (e) {} }
     fileAudioEl.src = URL.createObjectURL(file);
     fileAudioEl.loop = true;
-    const src = audioCtx.createMediaElementSource(fileAudioEl);
-    connectAudioSource(src, { toDestination: true }); // must route so user hears it
-    fileAudioEl.play();
+    connectAudioSource(fileSourceNode, { toDestination: true });
+    fileAudioEl.play().catch(() => {});
     setMusicLabel('♫ ' + file.name);
     enterVisualizer();
   }
