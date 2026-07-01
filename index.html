@@ -269,6 +269,24 @@
     </div>
   </div>
 
+  <p class="section-label">Audio</p>
+
+  <div class="control-group">
+    <label>Reactivity <span id="reactivityVal">1.0</span></label>
+    <input type="range" id="reactivity" min="0.2" max="3" step="0.1" value="1">
+  </div>
+
+  <div class="control-group">
+    <label>Bass ⟷ Treble focus <span id="bassTrebleVal">0</span></label>
+    <input type="range" id="bassTreble" min="-1" max="1" step="0.1" value="0">
+  </div>
+
+  <div class="control-group inline">
+    <label><input type="checkbox" id="beatFlash" checked> Beat flash pulse</label>
+  </div>
+
+  <div class="divider"></div>
+
   <p class="section-label">Shape</p>
 
   <div class="control-group">
@@ -455,6 +473,7 @@
   let currentSourceNode = null;
   let beatDetector = AudioCore.createBeatDetector();
   let reactivity = 1.0; // user-controllable gain on band response (Task 5)
+  let bassTreble = 0;   // -1 bass focus .. 0 balanced .. +1 treble focus (Task 5)
   const audioSignals = { bass: 0, mids: 0, highs: 0, level: 0, beat: false };
 
   function ensureAudioContext(){
@@ -485,9 +504,11 @@
     const bands = AudioCore.computeBands(freqData);
     const g = reactivity;
     const f = 0.35; // easing snappiness
-    audioSignals.bass  = AudioCore.ease(audioSignals.bass,  Math.min(bands.bass  * g, 1), f);
+    const bassW = 1 + Math.max(0, -bassTreble) * 1.2;
+    const trebW = 1 + Math.max(0,  bassTreble) * 1.2;
+    audioSignals.bass  = AudioCore.ease(audioSignals.bass,  Math.min(bands.bass  * g * bassW, 1), f);
     audioSignals.mids  = AudioCore.ease(audioSignals.mids,  Math.min(bands.mids  * g, 1), f);
-    audioSignals.highs = AudioCore.ease(audioSignals.highs, Math.min(bands.highs * g, 1), f);
+    audioSignals.highs = AudioCore.ease(audioSignals.highs, Math.min(bands.highs * g * trebW, 1), f);
     audioSignals.level = AudioCore.ease(audioSignals.level, Math.min(bands.level * g, 1), f);
     audioSignals.beat  = beatDetector.push(bands.bass);
   }
@@ -588,6 +609,7 @@
     background(bgColourP5);
     wireUpPanel();
     wireUpEntryAndMusic();
+    wireUpMusicWidget();
   }
 
   function draw(){
@@ -796,6 +818,7 @@
     resizeCanvas(windowWidth, windowHeight);
     background(bgColourP5);
     lastX = null; lastY = null;
+    prevBrushX = null; prevBrushY = null;
   }
 
   // ---------- touch support (phones/tablets) ----------
@@ -831,6 +854,26 @@
 
     $('fileInput').addEventListener('change', (e) => {
       if (e.target.files && e.target.files[0]) startFileSource(e.target.files[0]);
+    });
+  }
+
+  // ---------- music widget (play/pause + volume for the active source) ----------
+  function wireUpMusicWidget(){
+    const $ = (id) => document.getElementById(id);
+    $('musicToggle').addEventListener('click', () => {
+      // File source: toggle the audio element. YouTube: toggle the iframe.
+      if (fileAudioEl && !fileAudioEl.paused){ fileAudioEl.pause(); $('musicToggle').textContent = '▶'; return; }
+      if (fileAudioEl && fileAudioEl.paused && fileAudioEl.src){ fileAudioEl.play(); $('musicToggle').textContent = '⏸'; return; }
+      if (ytPlayer && ytPlayer.getPlayerState){
+        const st = ytPlayer.getPlayerState(); // 1 = playing
+        if (st === 1){ ytPlayer.pauseVideo(); $('musicToggle').textContent = '▶'; }
+        else { ytPlayer.playVideo(); $('musicToggle').textContent = '⏸'; }
+      }
+    });
+    $('musicVolume').addEventListener('input', (e) => {
+      const v = parseInt(e.target.value, 10);
+      if (fileAudioEl) fileAudioEl.volume = v / 100;
+      if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(v);
     });
   }
 
@@ -898,6 +941,16 @@
     $('reactSpeed').addEventListener('change', (e) => { reactToSpeed = e.target.checked; });
     $('pulseBrush').addEventListener('change', (e) => { pulseBrush = e.target.checked; });
     $('sparkleDust').addEventListener('change', (e) => { sparkleDust = e.target.checked; });
+
+    $('reactivity').addEventListener('input', (e) => {
+      reactivity = parseFloat(e.target.value);
+      $('reactivityVal').textContent = reactivity.toFixed(1);
+    });
+    $('bassTreble').addEventListener('input', (e) => {
+      bassTreble = parseFloat(e.target.value);
+      $('bassTrebleVal').textContent = bassTreble.toFixed(1);
+    });
+    $('beatFlash').addEventListener('change', (e) => { beatFlash = e.target.checked; });
 
     $('autoRotate').addEventListener('change', (e) => {
       autoRotate = e.target.checked;
