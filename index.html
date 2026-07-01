@@ -433,6 +433,13 @@
   let lastX = null, lastY = null;
   let particles = [];
 
+  // ---------- audio-driven virtual brush ----------
+  let brushAngle = 0;      // sweeps around the centre over time
+  let brushRadius = 0;     // eased current radius
+  let prevBrushX = null, prevBrushY = null;
+  let beatFlash = true;    // user toggle (Task 5)
+  let flashPulse = 0;      // decays 1 -> 0 after each beat
+
   const PALETTE_RANGES = {
     full:   [0, 360],
     sunset: [320, 400],
@@ -606,15 +613,36 @@
 
     updateAndDrawParticles();
 
-    if (lastX === null){
-      lastX = mouseX; lastY = mouseY;
-      return;
-    }
+    audioBrushStep();
 
-    if (mouseX !== lastX || mouseY !== lastY){
+    // Cursor stays live as an optional secondary brush.
+    if (lastX !== null && (mouseX !== lastX || mouseY !== lastY)){
       drawMandalaStroke(lastX, lastY, mouseX, mouseY);
     }
     lastX = mouseX; lastY = mouseY;
+  }
+
+  function audioBrushStep(){
+    const cx = width / 2, cy = height / 2;
+    const maxR = min(width, height) * 0.46;
+
+    // beat pulse decays each frame; refresh on a kick
+    if (audioSignals.beat && beatFlash) flashPulse = 1;
+    flashPulse *= 0.90;
+
+    // angular sweep speed rides the mids; bass swells the radius
+    brushAngle += 0.06 + audioSignals.mids * 0.22;
+    const targetR = maxR * (0.18 + audioSignals.bass * 0.9 + flashPulse * 0.15);
+    brushRadius = AudioCore.ease(brushRadius, targetR, 0.25);
+
+    // fine highs add a shimmer wobble to the radius
+    const wobble = sin(brushAngle * 7) * audioSignals.highs * 24;
+    const bx = cx + cos(brushAngle) * (brushRadius + wobble);
+    const by = cy + sin(brushAngle) * (brushRadius + wobble);
+
+    if (prevBrushX === null){ prevBrushX = bx; prevBrushY = by; }
+    drawMandalaStroke(prevBrushX, prevBrushY, bx, by, true);
+    prevBrushX = bx; prevBrushY = by;
   }
 
   function paletteHue(t){
@@ -641,13 +669,17 @@
     endShape(CLOSE);
   }
 
-  function drawMandalaStroke(x1, y1, x2, y2){
+  function drawMandalaStroke(x1, y1, x2, y2, audioDriven){
     const cx = width / 2, cy = height / 2;
     const dx = x2 - cx, dy = y2 - cy;
     const pdx = x1 - cx, pdy = y1 - cy;
     const speed = dist(x1, y1, x2, y2);
 
     let sw = brushSize + (reactToSpeed ? min(speed * 0.6, 22) : 0);
+    if (audioDriven){
+      sw += audioSignals.bass * 16 + audioSignals.level * 6 + flashPulse * 8;
+      sw = max(sw, 1);
+    }
     if (pulseBrush){
       sw += sin(frameCount * 0.12) * (brushSize * 0.5);
       sw = max(sw, 1);
@@ -657,7 +689,7 @@
     if (colourMode === 'rainbow'){
       const t = ((hueShift + (reactToSpeed ? speed * 4 : 0)) % 360) / 360;
       strokeColour = color(paletteHue(t), 75, 100, 92);
-      hueShift = (hueShift + 0.7) % 360;
+      hueShift = (hueShift + 0.7 + (audioDriven ? audioSignals.highs * 6 : 0)) % 360;
     } else if (colourMode === 'gradient'){
       const d = dist(dx, dy, 0, 0);
       const maxD = dist(0, 0, cx, cy);
@@ -669,7 +701,7 @@
 
     maybeSpawnParticles(x2, y2, strokeColour);
 
-    drawingContext.shadowBlur = glowIntensity;
+    drawingContext.shadowBlur = glowIntensity + (audioDriven ? audioSignals.level * 22 : 0);
     drawingContext.shadowColor = strokeColour.toString();
 
     push();
