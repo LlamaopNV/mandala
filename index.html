@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="audio-core.js"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
 <style>
   :root{
@@ -405,6 +406,50 @@
   let musicPlaying = false;
   let hasEntered = false;
 
+  // ---------- audio analysis engine ----------
+  let audioCtx = null;
+  let analyser = null;
+  let freqData = null;
+  let currentSourceNode = null;
+  let beatDetector = AudioCore.createBeatDetector();
+  let reactivity = 1.0; // user-controllable gain on band response (Task 5)
+  const audioSignals = { bass: 0, mids: 0, highs: 0, level: 0, beat: false };
+
+  function ensureAudioContext(){
+    if (!audioCtx){
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.75;
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function connectAudioSource(node, opts){
+    ensureAudioContext();
+    if (currentSourceNode){
+      try { currentSourceNode.disconnect(); } catch (e) {}
+    }
+    currentSourceNode = node;
+    node.connect(analyser);
+    if (opts && opts.toDestination) node.connect(audioCtx.destination);
+  }
+
+  function updateAudioSignals(){
+    if (!analyser){ audioSignals.beat = false; return; }
+    analyser.getByteFrequencyData(freqData);
+    const bands = AudioCore.computeBands(freqData);
+    const g = reactivity;
+    const f = 0.35; // easing snappiness
+    audioSignals.bass  = AudioCore.ease(audioSignals.bass,  Math.min(bands.bass  * g, 1), f);
+    audioSignals.mids  = AudioCore.ease(audioSignals.mids,  Math.min(bands.mids  * g, 1), f);
+    audioSignals.highs = AudioCore.ease(audioSignals.highs, Math.min(bands.highs * g, 1), f);
+    audioSignals.level = AudioCore.ease(audioSignals.level, Math.min(bands.level * g, 1), f);
+    audioSignals.beat  = beatDetector.push(bands.bass);
+  }
+
   function onYouTubeIframeAPIReady(){
     ytPlayer = new YT.Player('yt-player', {
       height: '0',
@@ -443,6 +488,8 @@
   }
 
   function draw(){
+    updateAudioSignals();
+
     if (autoRotate && rotateSpeed > 0){
       const snapshot = get();
       background(bgColourP5);
