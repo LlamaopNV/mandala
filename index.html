@@ -673,13 +673,20 @@
     if (audioSignals.beat && beatFlash) flashPulse = 1;
     flashPulse *= 0.90;
 
-    // angular sweep speed rides the mids; bass swells the radius
-    brushAngle += 0.06 + audioSignals.mids * 0.22;
-    const targetR = maxR * (0.18 + audioSignals.bass * 0.9 + flashPulse * 0.15);
-    brushRadius = AudioCore.ease(brushRadius, targetR, 0.25);
+    // The brush sweeps around AND weaves in/out, so its strokes cross radii —
+    // that radial motion is what the symmetry turns into arms & petals.
+    // (A constant radius, like before, could only ever draw a ring.)
+    brushAngle += 0.05 + audioSignals.mids * 0.15;
 
-    // fine highs add a shimmer wobble to the radius
-    const wobble = sin(brushAngle * 7) * audioSignals.highs * 24;
+    const petals = 3;                                    // in/out cycles per revolution
+    const weave = 0.5 + 0.5 * sin(brushAngle * petals);  // 0..1 rose in/out
+    // bass sets how far the brush flings outward; a beat punches it further.
+    const reach = 0.12 + audioSignals.bass * 1.1 + flashPulse * 0.7;
+    const targetR = maxR * constrain(reach * (0.25 + 0.75 * weave), 0.04, 1);
+    brushRadius = AudioCore.ease(brushRadius, targetR, 0.6); // snappy so it tracks the weave
+
+    // highs add a fine shimmer to the radius
+    const wobble = sin(brushAngle * 13) * audioSignals.highs * 18;
     const bx = cx + cos(brushAngle) * (brushRadius + wobble);
     const by = cy + sin(brushAngle) * (brushRadius + wobble);
 
