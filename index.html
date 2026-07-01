@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mandala — drawn by your cursor</title>
+<title>Mandala — an audio visualizer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
@@ -265,7 +265,7 @@
     <span class="panel-glyph">✦</span>
     <div>
       <h1>MANDALA</h1>
-      <p>drawn by your cursor</p>
+      <p>drawn by your music</p>
     </div>
   </div>
 
@@ -537,10 +537,25 @@
   function startYouTube(url){
     const id = AudioCore.parseYouTubeId(url);
     if (!id){ showSrcError('That doesn’t look like a YouTube link.'); return false; }
+    stopFile();     // don't let an uploaded file play over the YouTube audio
+    stopCapture();  // a stale tab capture no longer matches the new video
     if (ytApiReady) createYtPlayer(id); else pendingVideoId = id;
     // NOTE: the iframe plays audio out the tab; user connects it via "Connect a tab".
     showSrcHint('Now click “Connect a tab’s audio”, pick <b>This Tab</b>, and tick <b>Share tab audio</b>.');
     return true;
+  }
+
+  // ---------- source teardown (keep sources mutually exclusive) ----------
+  let captureStream = null;
+  function stopCapture(){
+    if (captureStream){ captureStream.getTracks().forEach(t => t.stop()); captureStream = null; }
+  }
+  function stopFile(){
+    if (fileAudioEl && !fileAudioEl.paused) fileAudioEl.pause();
+  }
+  function stopYouTube(){
+    if (ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo();
+    const el = document.getElementById('yt-player'); if (el) el.style.display = 'none';
   }
 
   // ---------- tab / system audio capture ----------
@@ -556,6 +571,10 @@
       }
       // We only need audio; stop the video track to save resources.
       stream.getVideoTracks().forEach(t => t.stop());
+      stopFile();              // a playing upload would double with the captured audio
+      stopCapture();           // release any previous capture before retaining this one
+      captureStream = stream;  // retain so we can stop the tracks (and the sharing indicator) later
+      tracks[0].addEventListener('ended', () => { captureStream = null; }); // user hit "Stop sharing"
       const src = audioCtx.createMediaStreamSource(new MediaStream(tracks));
       connectAudioSource(src, { toDestination: false }); // tab already audible
       setMusicLabel('♫ live tab audio');
@@ -570,6 +589,8 @@
   let fileSourceNode = null;
   function startFileSource(file){
     ensureAudioContext();
+    stopCapture();   // release any tab capture (and its sharing indicator)
+    stopYouTube();   // silence/hide a YouTube player so only the file plays
     if (!fileAudioEl){
       fileAudioEl = new Audio();
       fileAudioEl.crossOrigin = 'anonymous';
