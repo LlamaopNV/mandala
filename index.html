@@ -53,6 +53,29 @@
   }
   #enter-btn:hover{ transform:scale(1.05); background:linear-gradient(90deg, rgba(242,193,78,0.32), rgba(255,62,148,0.32)); }
 
+  .source-block{ display:flex; gap:8px; margin:6px 0 10px; }
+  #ytUrl{
+    flex:1; padding:11px 13px; border-radius:24px;
+    background:var(--select-bg); border:1px solid rgba(242,193,78,0.3);
+    color:var(--ink); font-family:'Inter',sans-serif; font-size:13px;
+  }
+  #ytUrl:focus{ outline:1px solid var(--gold); }
+  .src-btn{
+    font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600;
+    letter-spacing:0.04em; padding:11px 18px; border-radius:24px;
+    border:1px solid rgba(242,193,78,0.5); color:var(--ink); white-space:nowrap;
+    background:linear-gradient(90deg, rgba(242,193,78,0.20), rgba(255,62,148,0.20));
+    transition: transform 0.15s ease, background 0.2s ease;
+  }
+  .src-btn:hover{ transform:translateY(-1px); background:linear-gradient(90deg, rgba(242,193,78,0.34), rgba(255,62,148,0.34)); }
+  .src-btn.ghost{ background:rgba(255,255,255,0.03); border-color:rgba(242,193,78,0.3); font-weight:500; }
+  .source-or{ color:var(--ink-dim); font-size:11px; letter-spacing:0.2em; text-transform:uppercase; margin:6px 0; }
+  .source-row{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .src-hint{ font-size:11px !important; color:var(--ink-dim); margin:16px 0 0 !important; }
+  .src-hint b{ color:var(--gold); font-weight:600; }
+  .src-error{ font-size:12px; color:var(--magenta); margin:8px 0 0; min-height:16px; }
+  #connectTab.unsupported{ display:none; }
+
   /* ---- music widget ---- */
   #music-widget{
     position:fixed; bottom:20px; left:20px; z-index:10;
@@ -204,12 +227,30 @@
   <div class="enter-inner">
     <span class="enter-glyph">✦</span>
     <h1>MANDALA</h1>
-    <p>Sit back, relax, and let your cursor become the brush.<br>Music starts the moment you begin.</p>
-    <button id="enter-btn">Begin</button>
+    <p>Feed it music and it blooms. Paste a YouTube link, connect a tab that's
+       already playing, or drop in an audio file.</p>
+
+    <div class="source-block">
+      <input type="text" id="ytUrl" placeholder="Paste a YouTube link…" autocomplete="off">
+      <button id="ytGo" class="src-btn">Play &amp; visualize</button>
+    </div>
+
+    <div class="source-or">or</div>
+
+    <div class="source-row">
+      <button id="connectTab" class="src-btn ghost">🔊 Connect a tab’s audio</button>
+      <label for="fileInput" class="src-btn ghost" id="fileLabel">🎵 Upload a file</label>
+      <input type="file" id="fileInput" accept="audio/*" hidden>
+    </div>
+
+    <p class="src-hint" id="srcHint">
+      Tip: for a tab, pick <b>This Tab</b> and tick <b>Share tab audio</b>.
+    </p>
+    <p class="src-error" id="srcError"></p>
   </div>
 </div>
 
-<div id="yt-player" style="position:fixed; width:0; height:0; overflow:hidden;"></div>
+<div id="yt-player" style="position:fixed; right:16px; bottom:16px; width:240px; height:135px; z-index:12; border-radius:10px; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.5); display:none;"></div>
 
 <div id="music-widget">
   <button id="musicToggle" title="Play/Pause music">▶</button>
@@ -400,12 +441,6 @@
     mono:   [38, 54]
   };
 
-  // ---------- YouTube music ----------
-  let ytPlayer = null;
-  let musicReady = false;
-  let musicPlaying = false;
-  let hasEntered = false;
-
   // ---------- audio analysis engine ----------
   let audioCtx = null;
   let analyser = null;
@@ -424,7 +459,7 @@
       analyser.smoothingTimeConstant = 0.75;
       freqData = new Uint8Array(analyser.frequencyBinCount);
     }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   }
 
   function connectAudioSource(node, opts){
@@ -450,28 +485,83 @@
     audioSignals.beat  = beatDetector.push(bands.bass);
   }
 
+  // ---------- YouTube (visible, user-supplied) ----------
+  let ytPlayer = null;
+  let ytApiReady = false;
+  let pendingVideoId = null;
+  let hasEntered = false;
+
   function onYouTubeIframeAPIReady(){
+    ytApiReady = true;
+    if (pendingVideoId) createYtPlayer(pendingVideoId);
+  }
+
+  function createYtPlayer(videoId){
+    document.getElementById('yt-player').style.display = 'block';
+    if (ytPlayer){ ytPlayer.loadVideoById(videoId); ytPlayer.playVideo(); return; }
     ytPlayer = new YT.Player('yt-player', {
-      height: '0',
-      width: '0',
-      videoId: 'WI4-HUn8dFc',
-      playerVars: { autoplay: 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
-      events: {
-        onReady: () => {
-          musicReady = true;
-          ytPlayer.setVolume(70);
-          if (hasEntered) startMusic();
-        }
-      }
+      width: '240', height: '135', videoId,
+      playerVars: { autoplay: 1, controls: 1, modestbranding: 1, rel: 0 },
+      events: { onReady: (e) => e.target.playVideo() }
     });
   }
 
-  function startMusic(){
-    if (!musicReady || !ytPlayer || musicPlaying) return;
-    ytPlayer.playVideo();
-    musicPlaying = true;
-    document.getElementById('musicToggle').textContent = '⏸';
+  function startYouTube(url){
+    const id = AudioCore.parseYouTubeId(url);
+    if (!id){ showSrcError('That doesn’t look like a YouTube link.'); return false; }
+    if (ytApiReady) createYtPlayer(id); else pendingVideoId = id;
+    // NOTE: the iframe plays audio out the tab; user connects it via "Connect a tab".
+    showSrcHint('Now click “Connect a tab’s audio”, pick <b>This Tab</b>, and tick <b>Share tab audio</b>.');
+    return true;
   }
+
+  // ---------- tab / system audio capture ----------
+  async function startTabCapture(){
+    try {
+      ensureAudioContext();
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const tracks = stream.getAudioTracks();
+      if (tracks.length === 0){
+        stream.getTracks().forEach(t => t.stop());
+        showSrcError('No audio was shared. Re-try and tick “Share tab audio”.');
+        return;
+      }
+      // We only need audio; stop the video track to save resources.
+      stream.getVideoTracks().forEach(t => t.stop());
+      const src = audioCtx.createMediaStreamSource(new MediaStream(tracks));
+      connectAudioSource(src, { toDestination: false }); // tab already audible
+      setMusicLabel('♫ live tab audio');
+      enterVisualizer();
+    } catch (err){
+      showSrcError('Audio sharing was cancelled or blocked.');
+    }
+  }
+
+  // ---------- uploaded file ----------
+  let fileAudioEl = null;
+  function startFileSource(file){
+    ensureAudioContext();
+    if (!fileAudioEl){ fileAudioEl = new Audio(); fileAudioEl.crossOrigin = 'anonymous'; }
+    fileAudioEl.src = URL.createObjectURL(file);
+    fileAudioEl.loop = true;
+    const src = audioCtx.createMediaElementSource(fileAudioEl);
+    connectAudioSource(src, { toDestination: true }); // must route so user hears it
+    fileAudioEl.play();
+    setMusicLabel('♫ ' + file.name);
+    enterVisualizer();
+  }
+
+  function enterVisualizer(){
+    document.getElementById('enter-overlay').classList.add('hidden');
+    document.getElementById('music-widget').classList.add('visible');
+    lastX = null; lastY = null;
+    hasEntered = true;
+  }
+
+  // ---------- small UI helpers ----------
+  function showSrcError(msg){ document.getElementById('srcError').innerHTML = msg; }
+  function showSrcHint(msg){ document.getElementById('srcHint').innerHTML = msg; }
+  function setMusicLabel(text){ const el = document.getElementById('musicLabel'); if (el) el.textContent = text; }
 
   function setup(){
     const cnv = createCanvas(windowWidth, windowHeight);
@@ -691,23 +781,18 @@
   function wireUpEntryAndMusic(){
     const $ = (id) => document.getElementById(id);
 
-    $('enter-btn').addEventListener('click', () => {
-      $('enter-overlay').classList.add('hidden');
-      $('music-widget').classList.add('visible');
-      lastX = null; lastY = null;
-      hasEntered = true;
-      startMusic();
-    });
+    $('ytGo').addEventListener('click', () => startYouTube($('ytUrl').value));
+    $('ytUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') startYouTube($('ytUrl').value); });
 
-    $('musicToggle').addEventListener('click', () => {
-      if (!musicReady || !ytPlayer) return;
-      if (musicPlaying){ ytPlayer.pauseVideo(); } else { ytPlayer.playVideo(); }
-      musicPlaying = !musicPlaying;
-      $('musicToggle').textContent = musicPlaying ? '⏸' : '▶';
-    });
+    if (AudioCore.canCaptureTabAudio(navigator)){
+      $('connectTab').addEventListener('click', startTabCapture);
+    } else {
+      $('connectTab').classList.add('unsupported');
+      showSrcHint('Tab capture needs Chrome/Edge desktop — use <b>Upload a file</b>.');
+    }
 
-    $('musicVolume').addEventListener('input', (e) => {
-      if (musicReady && ytPlayer) ytPlayer.setVolume(parseInt(e.target.value, 10));
+    $('fileInput').addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) startFileSource(e.target.files[0]);
     });
   }
 
