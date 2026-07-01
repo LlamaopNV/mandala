@@ -45,13 +45,17 @@
     const decay = opts.decay != null ? opts.decay : 0.96;
     const sensitivity = opts.sensitivity != null ? opts.sensitivity : 1.35;
     const minGap = opts.minGap != null ? opts.minGap : 6;
+    const warmup = opts.warmup != null ? opts.warmup : 8;
     let avg = 0;
-    let sinceBeat = 1 - minGap;
+    let count = 0;
+    let sinceBeat = minGap;
     return {
       push(energy) {
+        count++;
         sinceBeat++;
+        if (count === 1){ avg = energy; return false; } // bootstrap average
         let beat = false;
-        if (avg > 0.0001 && energy > avg * sensitivity && sinceBeat >= minGap) {
+        if (count > warmup && energy > avg * sensitivity && sinceBeat >= minGap) {
           beat = true;
           sinceBeat = 0;
         }

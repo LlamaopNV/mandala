@@ -70,3 +70,19 @@ test('canCaptureTabAudio: detects getDisplayMedia', () => {
   assert.strictEqual(AudioCore.canCaptureTabAudio({ mediaDevices: {} }), false);
   assert.strictEqual(AudioCore.canCaptureTabAudio(undefined), false);
 });
+
+test('createBeatDetector: no spurious beats on steady input', () => {
+  const bd = AudioCore.createBeatDetector();
+  let beats = 0;
+  for (let i = 0; i < 60; i++) if (bd.push(0.3)) beats++;
+  assert.strictEqual(beats, 0, 'steady input should never register a beat');
+});
+
+test('createBeatDetector: isolated spike after warmup fires once', () => {
+  const bd = AudioCore.createBeatDetector({ sensitivity: 1.35, minGap: 6, warmup: 8 });
+  for (let i = 0; i < 20; i++) bd.push(0.3); // establish baseline past warmup
+  let fires = 0;
+  if (bd.push(1.0)) fires++;                  // the spike
+  for (let i = 0; i < 6; i++) if (bd.push(0.3)) fires++; // refractory + settle
+  assert.strictEqual(fires, 1, 'one spike should produce exactly one beat');
+});
